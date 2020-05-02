@@ -14,6 +14,9 @@ import yfinance as yf
 import yahoofinancials
 import json
 import api_key # returns internal api key
+import plotly.graph_objects as go
+import plotly.express as px
+
 
 # initialize date and time for stock prices
 style.use('ggplot')
@@ -89,9 +92,60 @@ def print_latest_elon_rant():
     latest_post = json_str['text']
     return latest_post
 
+def print_most_recent_tweets():
+    elon = api.user_timeline('elonmusk', count = 1000)
+    status = elon[0:100]
+    pd.read_json(elon)
+    statuses = pd.DataFrame()
+    statuses["created_at"] = 0
+    statuses["tweet"] = 0
+
+
+
+
+i = 0
+elon = api.user_timeline('elonmusk', count = 1000)
+for status in elon:
+    json_str = json.loads(json.dumps(status._json))
+    if '@' not in json_str["text"]:
+        statuses.loc[i, 'created_at'] = json_str['created_at']
+        statuses.loc[i, 'tweet'] = json_str['text']
+        i = i+1
+    id = json_str['id']
+    while int(json_str['created_at'].split(" ")[-1]) > 2019:
+        elon = api.user_timeline('elonmusk', count = 1000)
+        for status in tqdm(elon):
+            json_str = json.loads(json.dumps(status._json))
+            if '@' not in json_str["text"]:
+                statuses.loc[i, 'created_at'] = json_str['created_at']
+                statuses.loc[i, 'tweet'] = json_str['text']
+                i = i+1
+
+
+json_str['id']
+
+
+
+json_str['created_at'].astype(date) < 2019
+tesla_data = json_str['created_at']
+datetime.strptime(tesla_data, '%Y')
+
+int(json_str['created_at'].split(" ")[-1]) < 2019
+
+len(statuses)
+statuses
+
+
+'@' in json_str["text"]
+
+statuses
+
+json_str["text"][0]
+
 latest_tweet = print_latest_elon_rant()
 
 print(print_latest_elon_rant())
+
 
 ''' import tesla stocks if not already saved'''
 tsla_df = yf.download('TSLA', start='2019-01-01', end='2020-04-01', interval = '60m', progress=False)
@@ -100,15 +154,25 @@ len(tsla_df)
 tsla_df.columns
 tsla_df.to_csv('tesla_stonks.csv')
 
-
-#read_csv
+'''read_csv'''
 tsla_df = pd.read_csv('tesla_stonks.csv')
 tsla_df.head()
 
-
-import plotly.express as px
-fig = px.histogram(tsla_df.iloc[-100:], x = "Datetime")
+# plot Stock Price - High
+fig = px.line(tsla_df, x='Datetime', y='High')
 fig.show()
+
+# plot Stock Price - Low
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=tsla_df.index, y=tsla_df.High, mode='lines', name = "High"))
+fig.add_trace(go.Scatter(x=tsla_df.index, y=tsla_df.Low, mode='lines', name = "Low"))
+
+
+# plot Stock Price - close - open
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=tsla_df['Datetime'], y=tsla_df["Close"] - tsla_df["Open"], mode='lines', name = "Close - Open"))
+
+
 
 set_of_buy = [] # fill with words that typicall yindicate a reduction in stock price
 set_of_sell = [] # fill with words that typicall yindicate a rise in stock price
