@@ -16,7 +16,12 @@ import json
 import api_key # returns internal api key
 import plotly.graph_objects as go
 import plotly.express as px
-
+from tqdm import tqdm
+import sklearn
+import numpy as np
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 
 # initialize date and time for stock prices
 style.use('ggplot')
@@ -34,7 +39,6 @@ try:
 except tweepy.TweepError:
     print('Error! Failed to get request token.')
 api = tweepy.API(auth)
-
 
 account_list = ['elonmusk']
 def account_summary(account_list):
@@ -84,14 +88,12 @@ def account_summary(account_list):
                       mentions.append(name)
           if status.created_at < end_date:
             break
-
 def print_latest_elon_rant():
     elon = api.user_timeline('elonmusk')
     status = elon[0]
     json_str = json.loads(json.dumps(status._json))
     latest_post = json_str['text']
     return latest_post
-
 def print_most_recent_tweets():
     elon = api.user_timeline('elonmusk', count = 1000)
     status = elon[0:100]
@@ -99,87 +101,100 @@ def print_most_recent_tweets():
     statuses = pd.DataFrame()
     statuses["created_at"] = 0
     statuses["tweet"] = 0
-
-
-
-
-i = 0
-elon = api.user_timeline('elonmusk', count = 1000)
-for status in elon:
-    json_str = json.loads(json.dumps(status._json))
-    if '@' not in json_str["text"]:
-        statuses.loc[i, 'created_at'] = json_str['created_at']
-        statuses.loc[i, 'tweet'] = json_str['text']
-        i = i+1
-    id = json_str['id']
-    while int(json_str['created_at'].split(" ")[-1]) > 2019:
-        elon = api.user_timeline('elonmusk', count = 1000)
+def get_elon_tweets_2020():
+    statuses = pd.DataFrame()
+    statuses['created_at'] = 0
+    statuses['tweet'] = 0
+    i = 0
+    elon = api.user_timeline('elonmusk', count = 1000)
+    for status in elon:
+        json_str = json.loads(json.dumps(status._json))
+        if json_str["text"][0] != '@':
+            statuses.loc[i, 'created_at'] = json_str['created_at']
+            statuses.loc[i, 'tweet'] = json_str['text']
+            i = i+1
+        id = json_str['id']
+    while int(json_str["created_at"].split(" ")[-1]) > 2019:
+        elon = api.user_timeline('elonmusk', max_id = id, count = 1000)
         for status in tqdm(elon):
             json_str = json.loads(json.dumps(status._json))
-            if '@' not in json_str["text"]:
+            if json_str["text"][0] != '@':
                 statuses.loc[i, 'created_at'] = json_str['created_at']
                 statuses.loc[i, 'tweet'] = json_str['text']
                 i = i+1
+            id = json_str['id']
+        print(json_str['created_at'].split(" ")[-1])
+    return statuses
+def load_tesla_stonks(interval):
+    if interval == '60m':
+        tsla_df = yf.download('TSLA', start='2019-01-01', end='2020-05-02', interval = '60m', progress=False)
+    else:
+        tsla_df = yf.download('TSLA', start='2019-01-01', end='2020-05-02', progress=False)
+    if interval == '60m':
+        tsla_df.to_csv('tesla_stonks_hourly.csv')
+    else:
+        tsla_df.to_csv('tesla_stonks_daily.csv')
+    return tsla_df
+def price_to_binary(x):
+    if x>0:
+        return 1
+    else:
+        return 0
+def text_to_binary(x, y):
+    if x in y:
+        return 1
+    else:
+        return 0
 
 
-json_str['id']
-
-
-
-json_str['created_at'].astype(date) < 2019
-tesla_data = json_str['created_at']
-datetime.strptime(tesla_data, '%Y')
-
-int(json_str['created_at'].split(" ")[-1]) < 2019
-
-len(statuses)
-statuses
-
-
-'@' in json_str["text"]
-
-statuses
-
-json_str["text"][0]
-
-latest_tweet = print_latest_elon_rant()
-
-print(print_latest_elon_rant())
-
-
-''' import tesla stocks if not already saved'''
-tsla_df = yf.download('TSLA', start='2019-01-01', end='2020-04-01', interval = '60m', progress=False)
+'''load csv files'''
+tsla_df = pd.read_csv('tesla_stonks_daily.csv')
+tsla_df['close-open'] = tsla_df['Close'] - tsla_df['Open']
 tsla_df.head()
-len(tsla_df)
-tsla_df.columns
-tsla_df.to_csv('tesla_stonks.csv')
+tsla_df['movement'] = tsla_df['close-open'].astype(float).apply(lambda x: price_to_binary(x))
+tsla_df.dtypes
+tsla_df["date_time"] = pd.to_datetime(tsla_df["Date"], utc = False).dt.date
 
-'''read_csv'''
-tsla_df = pd.read_csv('tesla_stonks.csv')
-tsla_df.head()
 
-# plot Stock Price - High
-fig = px.line(tsla_df, x='Datetime', y='High')
-fig.show()
+statuses = pd.read_csv("elon_tweets.csv").drop(columns = 'Unnamed: 0')
+statuses.head()
+statuses["date_time"] = pd.to_datetime(statuses['created_at'], utc = False).dt.date
 
-# plot Stock Price - Low
+merged_data = pd.merge(statuses, tsla_df, how = 'left', left_on = 'date_time', right_on = 'date_time')
+merged_data = merged_data.dropna()
+
+keywords = ['grimez', 'tesla', 'stock', 'high', 'vibe', 'anime', 'solar', 'corona', 'california', 'hospital', 'states', 'usa', 'america', 'rocket', 'free', 'texas', 'silicon', 'machine', 'mortality', 'hack']
+for all in keywords:
+    merged_data[all] = merged_data['tweet'].astype(str).apply(lambda x: text_to_binary(all, x.lower()))
+
+
+X = merged_data[keywords]
+y = merged_data['movement']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33)
+
+
+# fit model no training data
+model = xgb.XGBClassifier(max_depth = 10)
+eval_metric = ["auc","error"]
+model.fit(X_train, y_train, eval_metric=eval_metric)
+
+# test model
+y_pred = model.predict(X_test)
+predictions = [round(value) for value in y_pred]
+
+# evaluate predictions
+accuracy = accuracy_score(y_test, predictions)
+print("Accuracy: %.2f%%" % (accuracy * 100.0))
+
+
+
+# plots for Tesla Stock Price
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=tsla_df.index, y=tsla_df.High, mode='lines', name = "High"))
 fig.add_trace(go.Scatter(x=tsla_df.index, y=tsla_df.Low, mode='lines', name = "Low"))
 
-
+tsla_df.columns
 # plot Stock Price - close - open
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=tsla_df['Datetime'], y=tsla_df["Close"] - tsla_df["Open"], mode='lines', name = "Close - Open"))
-
-
-
-set_of_buy = [] # fill with words that typicall yindicate a reduction in stock price
-set_of_sell = [] # fill with words that typicall yindicate a rise in stock price
-
-
-import plotly.io as pio
-pio.renderers.default = "browser"
-
-BEarer token
-#AAAAAAAAAAAAAAAAAAAAAE8UEAEAAAAAwmm8fp1WnkDAjFYIbexsVdCk4yY%3DDNodCsTPddcyQOntyleBX1ppdDfxHOuzORagTDMc9Y0A5dfBKQ
+fig.add_trace(go.Scatter(x=tsla_df['Date'], y=tsla_df["Close"] - tsla_df["Open"], mode='lines', name = "Close - Open"))
