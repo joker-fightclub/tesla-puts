@@ -13,7 +13,7 @@
 ------
 ### Current Results
 - 50.65% Precision... that's better than random, right?
-- The model uses XGBoost and makes decisions based on the occurrence of certain words or phrases in a tweet
+- The model uses XGBoost and makes decisions based on the occurrence of certain words or phrases in a tweet. This really isnt how you should use XGBOsst but whatever.
 
 ------
 ### Improvements to do:
